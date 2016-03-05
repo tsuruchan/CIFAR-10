@@ -13,8 +13,8 @@ import chainer.links as L
 import matplotlib.pyplot as plt
 from sklearn.cross_validation import train_test_split
 
-
-parser = argparse.ArgumentParser(description='Chainer example: MNIST')
+# GPU設定
+parser = argparse.ArgumentParser(description='Chainer example: CIFAR-10')
 parser.add_argument('--gpu', '-gpu', default=-1, type=int,
                     help='GPU ID (negative value indicates CPU)')
 
@@ -25,7 +25,7 @@ if args.gpu >= 0:
     cuda.check_cuda_available()
 xp = cuda.cupy if args.gpu >= 0 else np
 
-
+# CIFAR-10データを読み込む関数
 def unpickle(file):
     fp = open(file, 'rb')
     if sys.version_info.major == 2:
@@ -36,6 +36,7 @@ def unpickle(file):
     return data
 
 
+# 5つに分かれているデータを全て読み込み一つにする
 X_train = None
 y_train = []
 
@@ -54,12 +55,13 @@ X_test = X_test.reshape(len(X_test),3,32,32)
 y_test = np.array(test_data_dic['labels'])
 X_train = X_train.reshape((len(X_train),3, 32, 32))
 
-#--- y_train ---#
+# 訓練データを増やす
+#---　　 y_train　　 ---#
 temp = y_train
 for i in range(7):
     y_train = np.r_[y_train, temp]
 
-#--- X_train ---#
+#---　　 X_train　　 ---#
 
 # ガンマ変換（1.5・0.75）
 gamma = 1.5
@@ -169,6 +171,7 @@ for i in range(50000):
 X = np.array(X)
 X_train = np.vstack((X_train, X))
 
+# INPUTデータはnp.float型・教師データはnp.int32型へ変換
 y_train = np.array(y_train)
 X_train = X_train.astype(np.float32)
 X_test = X_test.astype(np.float32)
@@ -177,6 +180,7 @@ X_test /= 255
 y_train = y_train.astype(np.int32)
 y_test = y_test.astype(np.int32)
 
+# 訓練データをシャッフル、その中の９割のデータを使用（３６万件）
 X_train, temp1, y_train, temp2 = train_test_split(X_train, y_train, train_size=0.9, random_state=0)
 
 
@@ -196,6 +200,7 @@ if args.gpu >= 0:
     cuda.get_device(args.gpu).use()
     model.to_gpu()
 
+# 順伝播関数
 def forward(x_data, y_data, train=True):
     x, t = chainer.Variable(x_data), chainer.Variable(y_data)
     h = F.relu(model.conv1(x))
@@ -209,44 +214,61 @@ def forward(x_data, y_data, train=True):
     
     return F.softmax_cross_entropy(y, t), F.accuracy(y, t)
 
+# optimizerの設定（今回はAdamを使用）
 optimizer = optimizers.Adam()
 optimizer.setup(model)
 
+# 結果を保存する配列
 train_loss = np.array([])
 train_acc  = np.array([])
 test_loss = np.array([])
 test_acc  = np.array([])
+
 N = 360000
 N_test = 10000
 batch_size = 100
 
+# 時間計測スタート
 start_time = time.clock()
+
+# エポック数40で回していく
 for epoch in range(40):
     print("epoch", epoch+1)
     
     perm = np.random.permutation(N)
     
+    # CPUで計算
     sum_accuracy = 0
     sum_loss = 0
     sum_accuracy = cuda.to_cpu(sum_accuracy)
     sum_loss = cuda.to_cpu(sum_loss)
     
+    # 訓練
+    # tadmを使うことにより、経過が視覚化できる
     for i in tqdm(range(0, N, batch_size)):
+        # GPU使用可能の場合はGPUを使用
         X_batch = xp.asarray(X_train[perm[i:i+batch_size]])
         y_batch = xp.asarray(y_train[perm[i:i+batch_size]])
         
+        # 勾配を初期化
         optimizer.zero_grads()
+        # 順伝播させて誤差と精度を計算
         loss, acc = forward(X_batch, y_batch)
+        # バックプロパゲーション
         loss.backward()
+        # 最適化ルーティーンを実行
         optimizer.update()
 
+        # pythonのlist.appendと同じような関数（np.concatenate）
         train_loss = np.concatenate((train_loss, [loss.data]))
         train_acc = np.concatenate((acc.data, [acc.data]))
         sum_loss     += float(cuda.to_cpu(loss.data)) * batch_size
         sum_accuracy += float(cuda.to_cpu(acc.data)) * batch_size
-
+        
+    # 訓練データの誤差と、正解精度を表示
     print("train mean loss={}, accuracy={}".format(sum_loss/N, sum_accuracy/N))
 
+    # テスト評価
     sum_accuracy = 0
     sum_loss = 0
     sum_accuracy = cuda.to_cpu(sum_accuracy)
@@ -256,6 +278,7 @@ for epoch in range(40):
         X_batch = xp.asarray(X_train[perm[i:i+batch_size]])
         y_batch = xp.asarray(y_train[perm[i:i+batch_size]])
         
+        # 順伝播させて誤差と精度を計算
         loss, acc = forward(X_batch, y_batch)
        
         train_loss = np.concatenate((train_loss, [loss.data]))
@@ -263,9 +286,8 @@ for epoch in range(40):
         sum_loss     += float(cuda.to_cpu(loss.data)) * batch_size
         sum_accuracy += float(cuda.to_cpu(acc.data)) * batch_size
         
-   
+   # 訓練データの誤差と、正解精度を表示
     print("test mean loss={}, accuracy={}".format(sum_loss/N_test, sum_accuracy/N_test))
 
 end_time = time.clock()
 print("total time : ", end_time - start_time)
-
