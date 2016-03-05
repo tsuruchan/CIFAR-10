@@ -212,10 +212,10 @@ def forward(x_data, y_data, train=True):
 optimizer = optimizers.Adam()
 optimizer.setup(model)
 
-train_loss = []
-train_acc  = []
-test_loss = []
-test_acc  = []
+train_loss = np.array([])
+train_acc  = np.array([])
+test_loss = np.array([])
+test_acc  = np.array([])
 N = 360000
 N_test = 10000
 batch_size = 100
@@ -225,8 +225,11 @@ for epoch in range(40):
     print("epoch", epoch+1)
     
     perm = np.random.permutation(N)
+    
     sum_accuracy = 0
     sum_loss = 0
+    sum_accuracy = cuda.to_cpu(sum_accuracy)
+    sum_loss = cuda.to_cpu(sum_loss)
     
     for i in tqdm(range(0, N, batch_size)):
         X_batch = xp.asarray(X_train[perm[i:i+batch_size]])
@@ -237,25 +240,28 @@ for epoch in range(40):
         loss.backward()
         optimizer.update()
 
-        train_loss.append(loss.data)
-        train_acc.append(acc.data)
-        sum_loss     += float(loss.data) * batch_size
-        sum_accuracy += float(acc.data) * batch_size
+        train_loss = np.concatenate((train_loss, [loss.data]))
+        train_acc = np.concatenate((acc.data, [acc.data]))
+        sum_loss     += float(cuda.to_cpu(loss.data)) * batch_size
+        sum_accuracy += float(cuda.to_cpu(acc.data)) * batch_size
 
     print("train mean loss={}, accuracy={}".format(sum_loss/N, sum_accuracy/N))
 
     sum_accuracy = 0
     sum_loss = 0
+    sum_accuracy = cuda.to_cpu(sum_accuracy)
+    sum_loss = cuda.to_cpu(sum_loss)
+    
     for i in tqdm(range(0, N_test, batch_size)):
         X_batch = xp.asarray(X_train[perm[i:i+batch_size]])
         y_batch = xp.asarray(y_train[perm[i:i+batch_size]])
         
         loss, acc = forward(X_batch, y_batch)
        
-        train_loss.append(loss.data)
-        train_acc.append(acc.data)
-        sum_loss     += float(loss.data) * batch_size
-        sum_accuracy += float(acc.data) * batch_size
+        train_loss = np.concatenate((train_loss, [loss.data]))
+        train_acc = np.concatenate((acc.data, [acc.data]))
+        sum_loss     += float(cuda.to_cpu(loss.data)) * batch_size
+        sum_accuracy += float(cuda.to_cpu(acc.data)) * batch_size
         
    
     print("test mean loss={}, accuracy={}".format(sum_loss/N_test, sum_accuracy/N_test))
